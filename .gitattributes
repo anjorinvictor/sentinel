@@ -1,0 +1,5 @@
+# Normalize line endings to LF across all OSes (team works on Windows + others)
+* text=auto eol=lf
+*.png binary
+*.ico binary
+*.jpg binary
