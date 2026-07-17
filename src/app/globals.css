@@ -1,26 +1,139 @@
 @import "tailwindcss";
 
+/*
+  Sentinel design system — dark fintech theme.
+  The app is dark-only (matches the approved Lovable design; there is no light mode),
+  so the Sentinel palette lives directly on :root and is the default everywhere.
+  Colors use the shadcn/ui token contract, then are exposed to Tailwind utilities via
+  @theme inline below. Every shadcn component (Button, Card, Input, ...) reads these
+  tokens, so the whole app inherits the look.
+
+  Palette rationale (defensible to a judge):
+  - Base:    deep navy/charcoal   -> serious, banking-grade, low eye strain
+  - Accent:  warm gold/amber      -> Sentinel brand + primary actions (single accent)
+  - Safe:    teal/cyan            -> "verified / normal" states
+  - Risk:    amber (reviewed), red (blocked) -> the three risk states in the spec
+*/
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --radius: 0.75rem;
+
+  /* Core surfaces */
+  --background: #0b1220; /* app base — deep navy */
+  --foreground: #e6edf7; /* primary text — soft off-white */
+
+  --card: #131c2e; /* raised card surface */
+  --card-foreground: #e6edf7;
+
+  --popover: #131c2e;
+  --popover-foreground: #e6edf7;
+
+  /* Brand accent — gold/amber (primary actions, Sentinel identity) */
+  --primary: #f0b429;
+  --primary-foreground: #1a1206; /* near-black text on gold for contrast */
+
+  /* Secondary / muted navy surfaces */
+  --secondary: #1b2740;
+  --secondary-foreground: #e6edf7;
+  --muted: #1b2740;
+  --muted-foreground: #93a1b5; /* slate-grey for secondary text */
+  --accent: #1b2740;
+  --accent-foreground: #e6edf7;
+
+  /* Destructive / blocked */
+  --destructive: #ef4444;
+  --destructive-foreground: #ffffff;
+
+  /* Lines & focus */
+  --border: #223049;
+  --input: #223049;
+  --ring: #f0b429; /* gold focus ring */
+
+  /* Semantic risk + safety tokens (Sentinel-specific, consumed directly) */
+  --safe: #2dd4bf; /* teal — verified/normal */
+  --safe-foreground: #04211d;
+  --risk-normal: #2dd4bf; /* green/teal — "Normal" */
+  --risk-reviewed: #f0b429; /* amber — "Reviewed" */
+  --risk-blocked: #ef4444; /* red — "Blocked" */
+
+  /* Chart palette (Recharts reads these) */
+  --chart-1: #f0b429; /* gold */
+  --chart-2: #2dd4bf; /* teal */
+  --chart-3: #60a5fa; /* blue */
+  --chart-4: #a78bfa; /* violet */
+  --chart-5: #f472b6; /* pink */
+
+  /* Sidebar (left rail is a touch darker than the app base) */
+  --sidebar: #0a111e;
+  --sidebar-foreground: #c6d0de;
+  --sidebar-primary: #f0b429;
+  --sidebar-primary-foreground: #1a1206;
+  --sidebar-accent: #16213a; /* active/hover item background */
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: #1b2740;
+  --sidebar-ring: #f0b429;
 }
 
+/* Map design tokens to Tailwind's color/radius utilities (bg-card, text-muted-foreground, rounded-lg, ...) */
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-safe: var(--safe);
+  --color-safe-foreground: var(--safe-foreground);
+  --color-risk-normal: var(--risk-normal);
+  --color-risk-reviewed: var(--risk-reviewed);
+  --color-risk-blocked: var(--risk-blocked);
+
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
   }
-}
-
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  html {
+    color-scheme: dark;
+  }
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+  }
 }
