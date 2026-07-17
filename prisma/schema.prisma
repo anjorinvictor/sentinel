@@ -1,0 +1,180 @@
+// Sentinel — Prisma schema
+// Hosted Postgres on Supabase (used purely as a database + table viewer; no Supabase
+// auth/storage). Two URLs: DATABASE_URL is the pooled connection the app uses at
+// runtime (serverless-safe); DIRECT_URL is the direct connection Prisma uses for
+// migrations and seeding.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Identity
+// ---------------------------------------------------------------------------
+
+model User {
+  id        String   @id @default(cuid())
+  name      String
+  email     String   @unique
+  createdAt DateTime @default(now())
+
+  accounts         Account[]
+  fingerprint      Fingerprint?
+  protectionEvents ProtectionEvent[]
+}
+
+model Account {
+  id            String   @id @default(cuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bankName      String   @default("Union Bank")
+  accountNumber String   @unique
+  // Naira balance. Decimal(14,2) => up to 999,999,999,999.99 with kobo precision.
+  balance       Decimal  @db.Decimal(14, 2)
+  createdAt     DateTime @default(now())
+
+  transactions Transaction[]
+
+  @@index([userId])
+}
+
+// ---------------------------------------------------------------------------
+// Raw truth: the transaction history. The fingerprint is computed FROM these
+// rows, so this table is the single source of truth for everything Sentinel knows.
+// ---------------------------------------------------------------------------
+
+enum TxDirection {
+  CREDIT // money in  (e.g. salary)
+  DEBIT // money out  (e.g. transfer to a vendor)
+}
+
+enum TxCategory {
+  SALARY
+  FOOD
+  DATA_AIRTIME
+  TRANSPORT
+  FAMILY
+  SAVINGS
+  UTILITIES
+  SHOPPING
+  TRANSFER
+  OTHER
+}
+
+enum TxChannel {
+  TRANSFER
+  CARD
+  BILL
+  STANDING_ORDER
+}
+
+model Transaction {
+  id        String  @id @default(cuid())
+  accountId String
+  account   Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  direction TxDirection
+  amount    Decimal     @db.Decimal(14, 2)
+
+  // Counterparty (present for DEBIT transfers; null for salary credits etc.)
+  recipientName    String?
+  recipientBank    String?
+  recipientAccount String?
+
+  category  TxCategory
+  channel   TxChannel  @default(TRANSFER)
+  narration String
+
+  // When the transaction happened. Indexed with accountId for fast history reads
+  // and hour-of-day / velocity computation.
+  occurredAt DateTime
+  createdAt  DateTime @default(now())
+
+  // Scoring result, set only for transactions that were scored by the Guardian
+  // (live transfers). Null for seeded history and incoming credits.
+  riskScore Int?
+  riskTier  String?
+
+  @@index([accountId, occurredAt])
+}
+
+// ---------------------------------------------------------------------------
+// The Financial Fingerprint — a persisted, user-editable snapshot of the
+// behavioural profile. It is COMPUTED from Transaction rows by the scoring
+// engine (computeProfile), never hand-entered. It exists so the Trust Panel can
+// display/edit/delete it, and so "delete my entire profile" can degrade
+// protection (no fingerprint => Transfer cannot score) and "restore" can
+// recompute it from the transaction history.
+// ---------------------------------------------------------------------------
+
+model Fingerprint {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Amount signal — statistics over DEBIT transfer amounts (Naira).
+  amountMean   Float
+  amountStd    Float
+  amountMin    Float
+  amountMax    Float
+  amountMedian Float
+
+  // Time signal — 24-bucket hour-of-day histogram of debit transfers.
+  // Stored as a JSON array of 24 integers (counts per hour 0..23).
+  hourHistogram Json
+
+  // Velocity signal — baseline transfer frequency.
+  txPerWeek Float
+
+  // Provenance / rhythm metadata.
+  sampleSize  Int // number of debit transfers used to build this profile
+  historyDays Int // span of history observed
+  computedAt  DateTime @default(now())
+
+  knownRecipients KnownRecipient[]
+}
+
+// Individual known recipients, as their own rows so the Trust Panel can
+// edit/delete them for real (delete a row = forget a payee).
+model KnownRecipient {
+  id            String @id @default(cuid())
+  fingerprintId String
+  fingerprint   Fingerprint @relation(fields: [fingerprintId], references: [id], onDelete: Cascade)
+
+  name          String
+  bank          String?
+  accountNumber String?
+  txCount       Int // how many times this recipient has been paid
+  totalAmount   Decimal  @db.Decimal(14, 2)
+  lastPaidAt    DateTime
+
+  @@index([fingerprintId])
+}
+
+// ---------------------------------------------------------------------------
+// Activity / Protection Log — every action Sentinel takes, for the Activity
+// screen and for auditability (explainability is mandatory).
+// ---------------------------------------------------------------------------
+
+model ProtectionEvent {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // SCORED | FLAGGED | HOLD | SCAM_CHECK | COOLING_OFF | PROFILE_EDIT | PROFILE_DELETE | PROFILE_RESTORE
+  type    String
+  score   Int?
+  tier    String?
+  summary String
+  detail  Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+}
