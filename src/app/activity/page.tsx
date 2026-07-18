@@ -1,12 +1,17 @@
-import { Activity } from "lucide-react";
-import { ScreenPlaceholder } from "@/components/screen-placeholder";
+import { getProtectionEvents } from "@/lib/data";
+import { ActivityView, type ActivityEvent } from "./activity-view";
 
-export default function ActivityPage() {
-  return (
-    <ScreenPlaceholder
-      title="Activity"
-      description="A filterable timeline of every action Sentinel has taken."
-      icon={Activity}
-    />
-  );
+export const dynamic = "force-dynamic";
+
+export default async function ActivityPage() {
+  const events = await getProtectionEvents(100);
+  const mapped: ActivityEvent[] = events.map((e) => ({
+    id: e.id,
+    type: e.type,
+    summary: e.summary,
+    score: e.score,
+    tier: e.tier,
+    createdAt: e.createdAt.toISOString(),
+  }));
+  return <ActivityView events={mapped} />;
 }
