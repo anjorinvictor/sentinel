@@ -69,10 +69,7 @@ export async function POST(req: Request) {
     }
     console.error("Scam Check failed:", err);
     return NextResponse.json(
-      {
-        error: "Sentinel couldn't analyse that message. Please try again.",
-        detail: (err as Error).message, // TEMP: surfaced for debugging the deploy
-      },
+      { error: "Sentinel couldn't analyse that message. Please try again." },
       { status: 502 }
     );
   }
