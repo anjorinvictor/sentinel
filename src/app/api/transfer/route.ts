@@ -52,7 +52,11 @@ export async function POST(req: Request) {
       }.`,
       score: score ?? undefined,
       tier: tier ?? undefined,
-      detail: { amount, recipientName: proposed.recipientName },
+      detail: {
+        status: "active",
+        amount,
+        recipientName: proposed.recipientName,
+      },
     });
     return NextResponse.json({ ok: true, decision, cooled: true });
   }
