@@ -1,5 +1,6 @@
 import type { Fingerprint, ProposedTransaction, SignalKind } from "./types";
 import { recipientKey } from "./profile";
+import { hourInZone } from "./time";
 
 /** The raw output of one signal, before weighting into the composite score. */
 export interface SignalOutput {
@@ -94,7 +95,7 @@ export function timeSignal(
   tx: ProposedTransaction,
   fp: Fingerprint
 ): SignalOutput {
-  const hour = tx.occurredAt.getHours();
+  const hour = hourInZone(tx.occurredAt);
   const hist = fp.hourHistogram;
   const total = hist.reduce((a, b) => a + b, 0);
   const maxCount = Math.max(...hist, 0);

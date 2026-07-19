@@ -3,6 +3,7 @@ import type {
   Fingerprint,
   KnownRecipientStat,
 } from "./types";
+import { hourInZone } from "./time";
 
 /** Milliseconds in one day. */
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -69,7 +70,7 @@ export function computeProfile(history: EngineTransaction[]): Fingerprint {
   // Hour-of-day histogram (0..23) of when the user sends money.
   const hourHistogram = new Array(24).fill(0);
   for (const t of debits) {
-    hourHistogram[t.occurredAt.getHours()] += 1;
+    hourHistogram[hourInZone(t.occurredAt)] += 1;
   }
 
   // Observed span of history, in days (at least 1 to avoid divide-by-zero).

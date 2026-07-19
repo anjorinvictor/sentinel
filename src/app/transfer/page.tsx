@@ -57,17 +57,23 @@ export default function TransferPage() {
   const set = (k: keyof Form, v: string) => setForm((f) => ({ ...f, [k]: v }));
 
   function applyPreset(kind: "safe" | "risky") {
+    // Pin timestamps to explicit WAT instants (UTC-anchored) so the demo lands
+    // identically regardless of the viewer's timezone. 12:00 UTC = 1 PM WAT
+    // (a normal active hour); 00:47 UTC = 1:47 AM WAT (a dead hour).
     if (kind === "safe") {
+      const t = new Date();
+      t.setUTCHours(12, 0, 0, 0);
       setForm({
         recipientName: "Chicken Republic",
         recipientAccount: "0221145098",
         recipientBank: "GTBank",
         amount: "5000",
+        occurredAt: t.toISOString(),
       });
     } else {
       // Fraud scenario: large amount, brand-new payee, 1:47 AM.
       const t = new Date();
-      t.setHours(1, 47, 0, 0);
+      t.setUTCHours(0, 47, 0, 0);
       setForm({
         recipientName: "Unknown Payee",
         recipientAccount: "9099887766",
