@@ -178,3 +178,39 @@ model ProtectionEvent {
 
   @@index([userId, createdAt])
 }
+
+// ---------------------------------------------------------------------------
+// Pending behavioural challenge. When a transfer is challenged, we generate a
+// question from the user's real history ("which of these have you paid before?")
+// and store the CORRECT answer here, server-side only, keyed to a short-lived id.
+// The correct answer is never sent to the client. Persisted (not in-memory)
+// because serverless functions don't share memory between the generate and
+// verify requests.
+// ---------------------------------------------------------------------------
+
+model PendingChallenge {
+  id     String @id @default(cuid())
+  userId String
+
+  // The answer: option ids that correspond to the user's real recipients.
+  correctIds String[]
+  // The 4 options shown to the client: [{ id, label }] (no correctness flag).
+  options Json
+
+  // The pending transfer to execute on success.
+  riskScore        Int
+  riskTier         String
+  amount           Decimal @db.Decimal(14, 2)
+  recipientName    String?
+  recipientBank    String?
+  recipientAccount String?
+  narration        String?
+  occurredAt       DateTime
+
+  attempts  Int      @default(0)
+  status    String   @default("PENDING") // PENDING | PASSED | FAILED
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+
+  @@index([userId])
+}

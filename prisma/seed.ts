@@ -21,6 +21,7 @@ async function main() {
   console.log("Seeding Sentinel demo data for Amina Okafor…");
 
   // Clean slate (FK-safe order).
+  await prisma.pendingChallenge.deleteMany();
   await prisma.protectionEvent.deleteMany();
   await prisma.knownRecipient.deleteMany();
   await prisma.fingerprint.deleteMany();
