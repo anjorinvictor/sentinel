@@ -11,7 +11,16 @@ export default async function TrustPanelPage() {
   ]);
 
   const auditLog = events
-    .filter((e) => ["SCORED", "CONFIRMED_AFTER_CHALLENGE", "COOLING_OFF", "SCAM_CHECK"].includes(e.type))
+    .filter((e) =>
+      [
+        "SCORED",
+        "CONFIRMED_AFTER_CHALLENGE",
+        "VERIFIED",
+        "FAILED_VERIFICATION",
+        "COOLING_OFF",
+        "SCAM_CHECK",
+      ].includes(e.type)
+    )
     .map((e) => ({
       id: e.id,
       type: e.type,

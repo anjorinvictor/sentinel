@@ -1,16 +1,20 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   Activity as ActivityIcon,
   ShieldCheck,
+  ShieldX,
   MessageSquare,
   Clock,
   Trash2,
   RotateCcw,
   UserMinus,
+  Fingerprint,
 } from "lucide-react";
 import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { RiskBadge } from "@/components/ui/badge";
 import { shortDateTime } from "@/lib/format";
 
@@ -21,12 +25,16 @@ export interface ActivityEvent {
   score: number | null;
   tier: string | null;
   createdAt: string;
+  cancellable?: boolean;
 }
 
 const TYPE_META: Record<string, { icon: typeof ShieldCheck; group: string }> = {
   SCORED: { icon: ShieldCheck, group: "transfers" },
   CONFIRMED_AFTER_CHALLENGE: { icon: ShieldCheck, group: "transfers" },
+  VERIFIED: { icon: Fingerprint, group: "transfers" },
+  FAILED_VERIFICATION: { icon: ShieldX, group: "transfers" },
   COOLING_OFF: { icon: Clock, group: "transfers" },
+  COOLING_OFF_CANCELLED: { icon: Clock, group: "transfers" },
   SCAM_CHECK: { icon: MessageSquare, group: "scam" },
   PROFILE_DELETE: { icon: Trash2, group: "profile" },
   PROFILE_RESTORE: { icon: RotateCcw, group: "profile" },
@@ -41,7 +49,23 @@ const FILTERS = [
 ];
 
 export function ActivityView({ events }: { events: ActivityEvent[] }) {
+  const router = useRouter();
   const [filter, setFilter] = useState("all");
+  const [cancelling, setCancelling] = useState<string | null>(null);
+
+  async function cancelHold(eventId: string) {
+    setCancelling(eventId);
+    try {
+      await fetch("/api/cooloff/cancel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ eventId }),
+      });
+      router.refresh();
+    } finally {
+      setCancelling(null);
+    }
+  }
 
   const shown =
     filter === "all"
@@ -103,6 +127,17 @@ export function ActivityView({ events }: { events: ActivityEvent[] }) {
                       <span>{shortDateTime(e.createdAt)}</span>
                     </div>
                   </div>
+                  {e.cancellable && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="shrink-0"
+                      onClick={() => cancelHold(e.id)}
+                      disabled={cancelling === e.id}
+                    >
+                      {cancelling === e.id ? "Cancelling…" : "Cancel hold"}
+                    </Button>
+                  )}
                 </li>
               );
             })}

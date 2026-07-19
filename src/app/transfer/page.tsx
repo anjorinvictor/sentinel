@@ -9,6 +9,9 @@ import {
   X,
   Clock,
   CheckCircle2,
+  Fingerprint,
+  ShieldX,
+  Loader2,
 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -16,6 +19,7 @@ import { Input, Label } from "@/components/ui/input";
 import { RiskBadge } from "@/components/ui/badge";
 import { ScoreGauge } from "@/components/score-gauge";
 import { naira } from "@/lib/format";
+import { cn } from "@/lib/utils";
 import type { ScoreResult, ScoreReason } from "@/lib/scoring";
 
 const BANKS = [
@@ -52,7 +56,6 @@ export default function TransferPage() {
   const [result, setResult] = useState<ScoreResult | null>(null);
   const [showModal, setShowModal] = useState(false);
   const [flash, setFlash] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
 
   const set = (k: keyof Form, v: string) => setForm((f) => ({ ...f, [k]: v }));
 
@@ -116,33 +119,33 @@ export default function TransferPage() {
     }
   }
 
-  async function execute(decision: "send" | "confirm" | "cooloff") {
-    setBusy(true);
-    try {
-      await fetch("/api/transfer", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          amount: Number(form.amount),
-          recipientName: form.recipientName,
-          recipientAccount: form.recipientAccount,
-          recipientBank: form.recipientBank,
-          occurredAt: form.occurredAt,
-          decision,
-        }),
-      });
-      setShowModal(false);
-      setFlash(
-        decision === "cooloff"
-          ? `24-hour cooling-off started for ${naira(Number(form.amount))} to ${form.recipientName}. No money has moved.`
-          : `${naira(Number(form.amount))} sent to ${form.recipientName}. Sentinel verified.`
-      );
-      setForm(EMPTY);
-      setResult(null);
-      router.refresh();
-    } finally {
-      setBusy(false);
-    }
+  /** Direct execution / proactive cooling-off (not the behavioural challenge path). */
+  async function execute(decision: "send" | "cooloff") {
+    await fetch("/api/transfer", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        amount: Number(form.amount),
+        recipientName: form.recipientName,
+        recipientAccount: form.recipientAccount,
+        recipientBank: form.recipientBank,
+        occurredAt: form.occurredAt,
+        decision,
+      }),
+    });
+    finish(
+      decision === "cooloff"
+        ? `24-hour cooling-off started for ${naira(Number(form.amount))} to ${form.recipientName}. No money has moved.`
+        : `${naira(Number(form.amount))} sent to ${form.recipientName}. Sentinel verified.`
+    );
+  }
+
+  function finish(message: string) {
+    setShowModal(false);
+    setFlash(message);
+    setForm(EMPTY);
+    setResult(null);
+    router.refresh();
   }
 
   const canSubmit =
@@ -230,37 +233,150 @@ export default function TransferPage() {
       {showModal && result && (
         <ChallengeModal
           result={result}
-          recipientName={form.recipientName}
-          amount={Number(form.amount)}
-          busy={busy}
+          tx={form}
           onCancel={() => setShowModal(false)}
-          onConfirm={() => execute("confirm")}
-          onCooloff={() => execute("cooloff")}
+          onProceed={execute}
+          onDone={finish}
         />
       )}
     </div>
   );
 }
 
+type Phase = "reasons" | "challenge" | "blocked";
+type Option = { id: string; label: string };
+
 function ChallengeModal({
   result,
-  recipientName,
-  amount,
-  busy,
+  tx,
   onCancel,
-  onConfirm,
-  onCooloff,
+  onProceed,
+  onDone,
 }: {
   result: ScoreResult;
-  recipientName: string;
-  amount: number;
-  busy: boolean;
+  tx: Form;
   onCancel: () => void;
-  onConfirm: () => void;
-  onCooloff: () => void;
+  onProceed: (decision: "send" | "cooloff") => Promise<void>;
+  onDone: (message: string) => void;
 }) {
   const unprotected = result.unprotected;
   const isHold = result.tier === "HOLD";
+  const amount = Number(tx.amount);
+
+  const [phase, setPhase] = useState<Phase>("reasons");
+  const [busy, setBusy] = useState(false);
+  const [challenge, setChallenge] = useState<{
+    challengeId: string;
+    options: Option[];
+  } | null>(null);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [inlineError, setInlineError] = useState<string | null>(null);
+  const [blockedMessage, setBlockedMessage] = useState<string>("");
+
+  function block(message: string) {
+    setBlockedMessage(message);
+    setPhase("blocked");
+  }
+
+  async function startChallenge() {
+    setBusy(true);
+    setInlineError(null);
+    try {
+      const res = await fetch("/api/challenge", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          amount,
+          recipientName: tx.recipientName,
+          recipientAccount: tx.recipientAccount,
+          recipientBank: tx.recipientBank,
+          occurredAt: tx.occurredAt,
+        }),
+      });
+      const data = await res.json();
+      // Fail closed on any error.
+      if (!res.ok) {
+        block(
+          "We couldn't set up verification, so we've kept your money safe. Please try again."
+        );
+        return;
+      }
+      if (data.fallback) {
+        block(
+          "We can't verify this transfer right now, so we've kept it blocked to keep you safe."
+        );
+        return;
+      }
+      setChallenge({ challengeId: data.challengeId, options: data.options });
+      setSelected([]);
+      setPhase("challenge");
+    } catch {
+      block("Something went wrong, so we've kept your money safe.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function verify() {
+    if (!challenge) return;
+    setBusy(true);
+    setInlineError(null);
+    try {
+      const res = await fetch("/api/challenge/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          challengeId: challenge.challengeId,
+          selectedIds: selected,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        block("Something went wrong, so we've kept your money safe.");
+        return;
+      }
+      switch (data.outcome) {
+        case "released":
+          onDone(
+            `Identity verified — ${naira(amount)} sent to ${tx.recipientName}.`
+          );
+          break;
+        case "cooloff":
+          onDone(
+            `Verified — but this transfer is unusual, so we're holding it for 24 hours. You can cancel anytime from Activity. Scammers rely on urgency; real transfers can wait a day.`
+          );
+          break;
+        case "retry":
+          setSelected([]);
+          setInlineError(
+            "That's not quite right — one more try. Pick everyone you've actually paid before."
+          );
+          break;
+        case "hard_block":
+          block(
+            "We couldn't verify this was you, so we've kept your money safe."
+          );
+          break;
+        case "expired":
+          block(
+            "This verification expired. Please start the transfer again."
+          );
+          break;
+        default:
+          block("Something went wrong, so we've kept your money safe.");
+      }
+    } catch {
+      block("Something went wrong, so we've kept your money safe.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function toggle(id: string) {
+    setSelected((s) =>
+      s.includes(id) ? s.filter((x) => x !== id) : [...s, id]
+    );
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
@@ -278,55 +394,172 @@ function ChallengeModal({
           </button>
         </div>
 
-        <div className="flex flex-col items-center gap-3 p-5">
-          {unprotected ? (
-            <div className="flex flex-col items-center gap-2 text-center">
-              <AlertTriangle className="h-10 w-10 text-risk-blocked" />
-              <div className="font-medium text-risk-blocked">
-                Protection is off
-              </div>
-            </div>
-          ) : (
-            <>
-              <ScoreGauge score={result.score} tier={result.tier} />
-              <RiskBadge tier={result.tier} />
-            </>
-          )}
-          <p className="text-center text-sm text-muted-foreground">
-            {unprotected
-              ? "Your profile is deleted, so Sentinel can't check this transfer. Restore it in the Trust Panel to turn protection back on."
-              : `You're about to send ${naira(amount)} to ${recipientName}. Here's what looked different from your usual behaviour:`}
-          </p>
-        </div>
-
-        {!unprotected && (
-          <div className="space-y-2 px-5">
-            {result.reasons
-              .filter((r) => r.points > 0 || r.signal === "recipient")
-              .map((r) => (
-                <ReasonRow key={r.signal} reason={r} />
-              ))}
+        {/* PHASE: blocked ------------------------------------------------ */}
+        {phase === "blocked" && (
+          <div className="flex flex-col items-center gap-3 p-6 text-center">
+            <ShieldX className="h-12 w-12 text-risk-blocked" />
+            <div className="font-medium">Transfer kept safe</div>
+            <p className="text-sm text-muted-foreground">{blockedMessage}</p>
+            <Button variant="outline" className="mt-2" onClick={onCancel}>
+              Close
+            </Button>
           </div>
         )}
 
-        <div className="flex flex-col gap-2 p-5 sm:flex-row">
-          <Button variant="outline" className="flex-1" onClick={onCancel} disabled={busy}>
-            Cancel
-          </Button>
-          {isHold && !unprotected && (
-            <Button
-              variant="secondary"
-              className="flex-1"
-              onClick={onCooloff}
-              disabled={busy}
-            >
-              <Clock className="h-4 w-4" /> Wait 24h
-            </Button>
-          )}
-          <Button className="flex-1" onClick={onConfirm} disabled={busy}>
-            {busy ? "…" : unprotected ? "Send anyway" : "This is me"}
-          </Button>
-        </div>
+        {/* PHASE: reasons ------------------------------------------------ */}
+        {phase === "reasons" && (
+          <>
+            <div className="flex flex-col items-center gap-3 p-5">
+              {unprotected ? (
+                <div className="flex flex-col items-center gap-2 text-center">
+                  <AlertTriangle className="h-10 w-10 text-risk-blocked" />
+                  <div className="font-medium text-risk-blocked">
+                    Protection is off
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <ScoreGauge score={result.score} tier={result.tier} />
+                  <RiskBadge tier={result.tier} />
+                </>
+              )}
+              <p className="text-center text-sm text-muted-foreground">
+                {unprotected
+                  ? "Your profile is deleted, so Sentinel can't check this transfer. Restore it in the Trust Panel to turn protection back on."
+                  : `You're about to send ${naira(amount)} to ${tx.recipientName}. Here's what looked different from your usual behaviour:`}
+              </p>
+            </div>
+
+            {!unprotected && (
+              <div className="space-y-2 px-5">
+                {result.reasons
+                  .filter((r) => r.points > 0 || r.signal === "recipient")
+                  .map((r) => (
+                    <ReasonRow key={r.signal} reason={r} />
+                  ))}
+              </div>
+            )}
+
+            <div className="flex flex-col gap-2 p-5 sm:flex-row">
+              <Button
+                variant="outline"
+                className="flex-1"
+                onClick={onCancel}
+                disabled={busy}
+              >
+                Cancel
+              </Button>
+              {isHold && !unprotected && (
+                <Button
+                  variant="secondary"
+                  className="flex-1"
+                  onClick={async () => {
+                    setBusy(true);
+                    await onProceed("cooloff");
+                  }}
+                  disabled={busy}
+                >
+                  <Clock className="h-4 w-4" /> Wait 24h
+                </Button>
+              )}
+              {unprotected ? (
+                <Button
+                  className="flex-1"
+                  onClick={async () => {
+                    setBusy(true);
+                    await onProceed("send");
+                  }}
+                  disabled={busy}
+                >
+                  {busy ? "…" : "Send anyway"}
+                </Button>
+              ) : (
+                <Button
+                  className="flex-1"
+                  onClick={startChallenge}
+                  disabled={busy}
+                >
+                  {busy ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Fingerprint className="h-4 w-4" />
+                  )}
+                  This is really me
+                </Button>
+              )}
+            </div>
+          </>
+        )}
+
+        {/* PHASE: challenge --------------------------------------------- */}
+        {phase === "challenge" && challenge && (
+          <>
+            <div className="p-5 pb-2">
+              <div className="flex items-center gap-2 font-medium">
+                <Fingerprint className="h-5 w-5 text-primary" />
+                Which of these have you sent money to before?
+              </div>
+              <p className="mt-2 text-sm text-muted-foreground">
+                Only you know your transaction history — that&apos;s why we ask
+                this instead of a password. Select everyone you recognise.
+              </p>
+              {inlineError && (
+                <div className="mt-3 rounded-lg border border-risk-reviewed/30 bg-risk-reviewed/10 px-3 py-2 text-sm text-risk-reviewed">
+                  {inlineError}
+                </div>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 gap-2 px-5 sm:grid-cols-2">
+              {challenge.options.map((o) => {
+                const on = selected.includes(o.id);
+                return (
+                  <button
+                    key={o.id}
+                    onClick={() => toggle(o.id)}
+                    className={cn(
+                      "rounded-lg border px-3 py-3 text-left text-sm transition-colors",
+                      on
+                        ? "border-primary bg-primary/10 text-foreground"
+                        : "border-border bg-background/30 hover:bg-secondary/60"
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        "mr-2 inline-flex h-4 w-4 items-center justify-center rounded border align-middle text-[10px]",
+                        on
+                          ? "border-primary bg-primary text-primary-foreground"
+                          : "border-muted-foreground/40"
+                      )}
+                    >
+                      {on ? "✓" : ""}
+                    </span>
+                    {o.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="flex flex-col gap-2 p-5 sm:flex-row">
+              <Button
+                variant="outline"
+                className="flex-1"
+                onClick={onCancel}
+                disabled={busy}
+              >
+                Cancel
+              </Button>
+              <Button
+                className="flex-1"
+                onClick={verify}
+                disabled={busy || selected.length === 0}
+              >
+                {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                Verify
+              </Button>
+            </div>
+          </>
+        )}
       </Card>
     </div>
   );
